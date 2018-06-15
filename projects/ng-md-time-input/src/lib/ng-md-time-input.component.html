@@ -1,4 +1,4 @@
-<form [formGroup]="parts" (mousedown)="keepFocus()">
+<!-- <form [formGroup]="parts" (mousedown)="keepFocus()">
     <span *ngIf="showDays">
         <input id="daysDecimal" formControlName="daysDecimal" placeholder="0" (input)="updateTime()" (keydown)="handleKeydown($event, 'daysDecimal')"
             #daysDecimal ng-md-only-number>
@@ -18,4 +18,13 @@
     <input id="minutesUnit" formControlName="minutesUnit" placeholder="0" (input)="updateTime()" (keydown)="handleKeydown($event, 'minutesUnit')"
         #minutesUnit ng-md-only-number>
     <span class="separator" [ngClass]="{dimmed:displayedMinutes==='' || disabled}" (mousedown)="keepFocus()">{{minutesSeparator}}</span>
+</form>
+ -->
+
+<form [formGroup]="partsGroup" (mousedown)="keepFocus()">
+    <span formArrayName="inputs" *ngFor="let input of parts.controls; index as i; even as even">
+        <span class="separator" *ngIf="even" [ngClass]="{dimmed: separators[i/2] === '' || disabled}" (mousedown)="keepFocus()">{{separators[i/2]}}</span>
+
+        <input [id]="i" [formControlName]="i" placeholder="0" (input)="updateTime()" (keydown)="handleKeydown($event, i)" #input ng-md-only-number>
+    </span>
 </form>

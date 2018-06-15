@@ -11,7 +11,9 @@ import {
     Optional,
     Renderer2,
     Self,
-    ViewChild
+    ViewChild,
+    ViewChildren,
+    QueryList
 } from "@angular/core";
 import {
     ControlValueAccessor,
@@ -22,7 +24,9 @@ import {
     Validators,
     AbstractControl,
     Validator,
-    ValidatorFn
+    ValidatorFn,
+    FormArray,
+    FormControl
 } from "@angular/forms";
 import { MatFormFieldControl } from "@angular/material";
 import { FocusMonitor, FocusOrigin } from "@angular/cdk/a11y";
@@ -35,6 +39,15 @@ import { TimeFactoryService } from "./time-factory.service";
 // Time Adapters
 import { MomentDurationAdapter, TimeInputAdapter } from "./adapters";
 import { TimeFormatter } from "./formatters";
+
+const MINUTES_UNIT_INCREMENT_STEP = 1;
+const NUMBER_OF_MINUTES_IN_TEN_MINUTES = 10;
+const NUMBER_OF_MINUTES_IN_HOUR = 60;
+const NUMBER_OF_MINUTES_IN_TEN_HOURS = 600;
+const NUMBER_OF_MINUTES_IN_DAY = 1440;
+const NUMBER_OF_MINUTES_IN_TEN_DAYS = 14400;
+const MAX_TIME_WITH_DAYS = 143999; // 99d 23:59
+const MAX_TIME_WITHOUT_DAYS = 1439; // 23:59
 
 @Component({
     selector: "ng-md-time-input",
@@ -67,31 +80,20 @@ export class NgMdTimeInputComponent
     daysSeparator = "d";
     hoursSeparator = ":";
     minutesSeparator = "";
+    separators = ["d", ":", ""];
     private _showDays = true;
     // Time management
     time: Duration | Moment | Date;
     private _timeAdapter: TimeInputAdapter<
         Duration | Moment | Date
     > = new MomentDurationAdapter();
-    private readonly MINUTES_UNIT_INCREMENT_STEP = 1;
-    private readonly NUMBER_OF_MINUTES_IN_TEN_MINUTES = 10;
-    private readonly NUMBER_OF_MINUTES_IN_HOUR = 60;
-    private readonly NUMBER_OF_MINUTES_IN_TEN_HOURS = 600;
-    private readonly NUMBER_OF_MINUTES_IN_DAY = 1440;
-    private readonly NUMBER_OF_MINUTES_IN_TEN_DAYS = 14400;
-    private readonly MAX_TIME_WITH_DAYS = 143999; // 99d 23:59
-    private readonly MAX_TIME_WITHOUT_DAYS = 1439; // 23:59
-    private _maxTimeInMinutes = this.MAX_TIME_WITH_DAYS; // 99d 23:59
+    private _maxTimeInMinutes = MAX_TIME_WITH_DAYS; // 99d 23:59
     // Form element management
     private _preventFocusLoss = false;
     private subscriptions: Subscription[] = [];
     stateChanges = new Subject<void>();
-    @ViewChild("minutesUnit") minutesUnit: ElementRef;
-    @ViewChild("minutesDecimal") minutesDecimal: ElementRef;
-    @ViewChild("hoursUnit") hoursUnit: ElementRef;
-    @ViewChild("hoursDecimal") hoursDecimal: ElementRef;
-    @ViewChild("daysUnit") daysUnit: ElementRef;
-    @ViewChild("daysDecimal") daysDecimal: ElementRef;
+    @ViewChildren("input") inputs: QueryList<ElementRef>;
+
     // For the change event
     private previousTime: Duration | Moment | Date = null;
     private shouldManuallyTriggerChangeEvent: boolean;
@@ -102,7 +104,8 @@ export class NgMdTimeInputComponent
     // Used by Angular Material to bind Aria ids to our control
     @HostBinding("attr.aria-describedby") describedBy = "";
 
-    parts: FormGroup;
+    partsGroup: FormGroup;
+    parts: FormArray;
     private _placeholder: string;
     focused = false;
     private _required = false;
@@ -128,14 +131,22 @@ export class NgMdTimeInputComponent
     ) {
         // Form initialization. On top of a directive that prevents the input of non
         // numerical char, we add a pattern to assure that only numbers are allowed.
-        this.parts = fb.group({
+        this.parts = fb.array(
+            ["", "", "", "", "", ""],
+            Validators.pattern(/[0-9]/)
+        );
+        // The form array must be in a FormGroup in order to use it in the HTML.
+        this.partsGroup = fb.group({
+            inputs: this.parts
+        });
+        /* {
             daysDecimal: ["", Validators.pattern(/[0-9]/)],
             daysUnit: ["", Validators.pattern(/[0-9]/)],
             hoursDecimal: ["", Validators.pattern(/[0-9]/)],
             hoursUnit: ["", Validators.pattern(/[0-9]/)],
             minutesDecimal: ["", Validators.pattern(/[0-9]/)],
             minutesUnit: ["", this.getMinutesUnitValidator()]
-        });
+        }); */
 
         // Subscribing to the form's status change in order to sync up the state of the NgControl with
         // the one of the form.
@@ -191,10 +202,21 @@ export class NgMdTimeInputComponent
     }
 
     set showDays(showDays: boolean) {
+        // Add two inputs to handle the days.
+        if (!this._showDays && showDays) {
+            this.parts.insert(0, new FormControl(""));
+            this.parts.insert(0, new FormControl(""));
+        }
+        // Remove the days input.
+        else if (this._showDays && !showDays) {
+            this.parts.removeAt(0);
+            this.parts.removeAt(0);
+        }
+
         this._showDays = showDays;
         this._maxTimeInMinutes = showDays
-            ? this.MAX_TIME_WITH_DAYS
-            : this.MAX_TIME_WITHOUT_DAYS;
+            ? MAX_TIME_WITH_DAYS
+            : MAX_TIME_WITHOUT_DAYS;
         this.formatDislayedTime();
     }
     get showDays(): boolean {
@@ -230,20 +252,18 @@ export class NgMdTimeInputComponent
      * Note: This affectation will not change the ngModel value.
      */
     set displayedDays(days: string | null) {
-        if(days) {
-            this.parts.get("daysDecimal").setValue(days.charAt(days.length - 2));
-            this.parts.get("daysUnit").setValue(days.charAt(days.length - 1));
-        }
-        else {
-            this.parts.get("daysDecimal").setValue("");
-            this.parts.get("daysUnit").setValue("");
+        if (days) {
+            const daysDecimal = this.getControlAt(0);
+            const daysUnit = this.getControlAt(1);
+            daysDecimal.setValue(days.charAt(days.length - 2));
+            daysUnit.setValue(days.charAt(days.length - 1));
         }
     }
     get displayedDays(): string {
-        return (
-            this.parts.get("daysDecimal").value +
-            this.parts.get("daysUnit").value
-        );
+        const daysDecimal = this.getControlAt(0);
+        const daysUnit = this.getControlAt(1);
+
+        return daysDecimal.value + daysUnit.value;
     }
 
     /**
@@ -251,14 +271,16 @@ export class NgMdTimeInputComponent
      * Note: This affectation will not change the ngModel value.
      */
     set displayedHours(hours: string) {
-        this.parts.get("hoursDecimal").setValue(hours.charAt(hours.length - 2));
-        this.parts.get("hoursUnit").setValue(hours.charAt(hours.length - 1));
+        const hoursDecimal = this.getControlAt(-4);
+        const hoursUnit = this.getControlAt(-3);
+        hoursDecimal.setValue(hours.charAt(hours.length - 2));
+        hoursUnit.setValue(hours.charAt(hours.length - 1));
     }
     get displayedHours(): string {
-        return (
-            this.parts.get("hoursDecimal").value +
-            this.parts.get("hoursUnit").value
-        );
+        const hoursDecimal = this.getControlAt(-4);
+        const hoursUnit = this.getControlAt(-3);
+
+        return hoursDecimal.value + hoursUnit.value;
     }
 
     /**
@@ -266,18 +288,31 @@ export class NgMdTimeInputComponent
      * Note: This affectation will not change the ngModel value.
      */
     set displayedMinutes(minutes: string) {
-        this.parts
-            .get("minutesDecimal")
-            .setValue(minutes.charAt(minutes.length - 2));
-        this.parts
-            .get("minutesUnit")
-            .setValue(minutes.charAt(minutes.length - 1));
+        const minutesDecimal = this.getControlAt(-2);
+        const minutesUnit = this.getControlAt(-1);
+        minutesDecimal.setValue(minutes.charAt(minutes.length - 2));
+        minutesUnit.setValue(minutes.charAt(minutes.length - 1));
     }
     get displayedMinutes(): string {
-        return (
-            this.parts.get("minutesDecimal").value +
-            this.parts.get("minutesUnit").value
-        );
+        const minutesDecimal = this.getControlAt(-2);
+        const minutesUnit = this.getControlAt(-1);
+
+        return minutesDecimal.value + minutesUnit.value;
+    }
+
+    private getControlAt(index: number): AbstractControl {
+        // If the index is negative and its absolute value is bigger than
+        // the number of controls, prevent it from accessing the negative index.
+        if (index + this.parts.controls.length < 0) {
+            index = 0;
+        }
+        // If the index is negative but its absolute value is still in the
+        // range of the controls, access the controls from the end.
+        else if (index < 0) {
+            index = this.parts.controls.length + index;
+        }
+
+        return this.parts.controls[index];
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -347,8 +382,8 @@ export class NgMdTimeInputComponent
 
     private setTime(days: number, hours: number, minutes: number) {
         const timeInMinutes =
-            days * this.NUMBER_OF_MINUTES_IN_DAY +
-            hours * this.NUMBER_OF_MINUTES_IN_HOUR +
+            days * NUMBER_OF_MINUTES_IN_DAY +
+            hours * NUMBER_OF_MINUTES_IN_HOUR +
             minutes;
         // If the time is greater than the max time, set it to the max time.
         if (timeInMinutes > this._maxTimeInMinutes) {
@@ -423,10 +458,10 @@ export class NgMdTimeInputComponent
      * @param event The keyboard event related to the key down.
      * @param targettedInputName The form control that had the focus while the key was pressed.
      */
-    handleKeydown(event: KeyboardEvent, targettedInputName: string): void {
+    handleKeydown(event: KeyboardEvent, targettedInputIndex: number): void {
         // On up arrow, we want to increment the targetted input
         if (event.key === "ArrowUp" || event.key === "Up") {
-            const incrementStep = this.getIncrementStep(targettedInputName);
+            const incrementStep = this.getIncrementStep(targettedInputIndex);
             this.incrementTime(incrementStep);
             event.preventDefault(); // Prevents the carret from moving to the lefthand of the input
             // event.stopPropagation(); // prevents the carret from moving
@@ -434,7 +469,7 @@ export class NgMdTimeInputComponent
         }
         // On down arrow, we want to decrement the targetted input
         else if (event.key === "ArrowDown" || event.key === "Down") {
-            const decrementStep = this.getDecrementStep(targettedInputName);
+            const decrementStep = this.getDecrementStep(targettedInputIndex);
             this.incrementTime(decrementStep);
             event.preventDefault(); // Prevents the carret from moving to the righthand of the input
             // event.stopPropagation(); // prevents the carret from moving
@@ -442,7 +477,7 @@ export class NgMdTimeInputComponent
         }
         // On left arrow, we want to move the carret to the left sibling of the targetted input
         else if (event.key === "ArrowLeft" || event.key === "Left") {
-            const leftSibling = this.getLeftSiblingOfInput(targettedInputName);
+            const leftSibling = this.getLeftSiblingOfInput(targettedInputIndex);
             // The sibling can be null if the carret cannot go further to the left or
             // can be undefined if the ViewChild was not properly initialized.
             if (leftSibling && leftSibling.nativeElement.value) {
@@ -457,7 +492,7 @@ export class NgMdTimeInputComponent
         // On right arrow, we want to move the carret to the right sibling of the targetted input
         else if (event.key === "ArrowRight" || event.key === "Right") {
             const rightSibling = this.getRightSiblingOfInput(
-                targettedInputName
+                targettedInputIndex
             );
             // The sibling can be null if the carret cannot go further to the right or
             // can be undefined if the ViewChild was not properly initialized.
@@ -498,39 +533,51 @@ export class NgMdTimeInputComponent
     /**
      * @returns The proper increment step, based on the given input name.
      */
-    private getIncrementStep(inputName: string): number {
-        switch (inputName) {
-            case "daysDecimal":
-                return this.NUMBER_OF_MINUTES_IN_TEN_DAYS;
-            case "daysUnit":
-                return this.NUMBER_OF_MINUTES_IN_DAY;
-            case "hoursDecimal":
+    private getIncrementStep(inputIndex: number): number {
+        if (!this.showDays) {
+            inputIndex = +2;
+        }
+        // Even though it is not the most elegant way of getting the increment step,
+        // it is done that way because of the hours decimal being base 24. The step
+        // is not constant and it changes depending on the current value of the hours.
+        switch (inputIndex) {
+            case 0: // daysDecimal
+                return NUMBER_OF_MINUTES_IN_TEN_DAYS;
+            case 1: // daysUnit
+                return NUMBER_OF_MINUTES_IN_DAY;
+            case 2: // hoursDecimal
                 return this.getHoursDecimalIncrementStep();
-            case "hoursUnit":
-                return this.NUMBER_OF_MINUTES_IN_HOUR;
-            case "minutesDecimal":
-                return this.NUMBER_OF_MINUTES_IN_TEN_MINUTES;
-            case "minutesUnit":
-                return this.MINUTES_UNIT_INCREMENT_STEP;
+            case 3: // hoursUnit
+                return NUMBER_OF_MINUTES_IN_HOUR;
+            case 4: // minutesDecimal
+                return NUMBER_OF_MINUTES_IN_TEN_MINUTES;
+            case 5: // minutesUnit
+                return MINUTES_UNIT_INCREMENT_STEP;
         }
     }
     /**
      * @returns The proper decrement step, based on the given input name.
      */
-    private getDecrementStep(inputName: string): number {
-        switch (inputName) {
-            case "daysDecimal":
-                return -1 * this.NUMBER_OF_MINUTES_IN_TEN_DAYS;
-            case "daysUnit":
-                return -1 * this.NUMBER_OF_MINUTES_IN_DAY;
-            case "hoursDecimal":
+    private getDecrementStep(inputIndex: number): number {
+        if (!this.showDays) {
+            inputIndex = +2;
+        }
+        // Even though it is not the most elegant way of getting the decrement step,
+        // it is done that way because of the hours decimal being base 24. The step
+        // is not constant and it changes depending on the current value of the hours.
+        switch (inputIndex) {
+            case 0: // daysDecimal
+                return -1 * NUMBER_OF_MINUTES_IN_TEN_DAYS;
+            case 1: // daysUnit
+                return -1 * NUMBER_OF_MINUTES_IN_DAY;
+            case 2: // hoursDecimal
                 return this.getHoursDecimalDecrementStep();
-            case "hoursUnit":
-                return -1 * this.NUMBER_OF_MINUTES_IN_HOUR;
-            case "minutesDecimal":
-                return -1 * this.NUMBER_OF_MINUTES_IN_TEN_MINUTES;
-            case "minutesUnit":
-                return -1 * this.MINUTES_UNIT_INCREMENT_STEP;
+            case 3: // hoursUnit
+                return -1 * NUMBER_OF_MINUTES_IN_HOUR;
+            case 4: // minutesDecimal
+                return -1 * NUMBER_OF_MINUTES_IN_TEN_MINUTES;
+            case 5: // minutesUnit
+                return -1 * MINUTES_UNIT_INCREMENT_STEP;
         }
     }
 
@@ -538,20 +585,20 @@ export class NgMdTimeInputComponent
         const currentNumberOfMinutesInTime =
             this.timeAdapter.getHours(this.time) * 60 +
             this.timeAdapter.getMinutes(this.time);
-        let incrementStep = this.NUMBER_OF_MINUTES_IN_TEN_HOURS;
+        let incrementStep = NUMBER_OF_MINUTES_IN_TEN_HOURS;
 
         // The hours are on a base 24, which means that we have to adjust the increment step
         // so that the increment does not change the hours unit. (Ex: We increment the hours decimal of 0d 15:00,
         // we don't want it to display as 1d 01:00, but we want it as 1d 05:00).
         if (
-            currentNumberOfMinutesInTime + this.NUMBER_OF_MINUTES_IN_TEN_HOURS >
-            this.NUMBER_OF_MINUTES_IN_DAY
+            currentNumberOfMinutesInTime + NUMBER_OF_MINUTES_IN_TEN_HOURS >
+            NUMBER_OF_MINUTES_IN_DAY
         ) {
             incrementStep =
                 (24 -
                     this.timeAdapter.getHours(this.time) +
                     (this.timeAdapter.getHours(this.time) % 10)) *
-                this.NUMBER_OF_MINUTES_IN_HOUR;
+                NUMBER_OF_MINUTES_IN_HOUR;
         }
 
         return incrementStep;
@@ -561,63 +608,47 @@ export class NgMdTimeInputComponent
         const currentNumberOfMinutesInTime =
             this.timeAdapter.getHours(this.time) * 60 +
             this.timeAdapter.getMinutes(this.time);
-        let decrementStep = this.NUMBER_OF_MINUTES_IN_TEN_HOURS * -1;
+        let decrementStep = NUMBER_OF_MINUTES_IN_TEN_HOURS * -1;
 
         // The hours are on a base 24, which means that we have to adjust the decrement step
         // so that the decrement does not change the hours unit. (Ex: We decrement the hours decimal of 1d 09:00,
         // we don't want it to display as 0d 23:00, but we want it as 0d 19:00).
-        if (
-            currentNumberOfMinutesInTime - this.NUMBER_OF_MINUTES_IN_TEN_HOURS <
-            0
-        ) {
+        if (currentNumberOfMinutesInTime - NUMBER_OF_MINUTES_IN_TEN_HOURS < 0) {
             decrementStep =
                 (this.timeAdapter.getHours(this.time) +
                     ((14 - this.timeAdapter.getHours(this.time)) % 10)) *
-                this.NUMBER_OF_MINUTES_IN_HOUR *
+                NUMBER_OF_MINUTES_IN_HOUR *
                 -1;
         }
 
         return decrementStep;
     }
 
-    private getLeftSiblingOfInput(inputName: string): ElementRef | null {
-        switch (inputName) {
-            case "daysDecimal":
-                return null;
-            case "daysUnit":
-                return this.daysDecimal;
-            case "hoursDecimal":
-                return this.daysUnit;
-            case "hoursUnit":
-                return this.hoursDecimal;
-            case "minutesDecimal":
-                return this.hoursUnit;
-            case "minutesUnit":
-                return this.minutesDecimal;
+    private getLeftSiblingOfInput(inputIndex: number): ElementRef | null {
+        inputIndex -= 1;
+        if (inputIndex <= 0) {
+            return null;
         }
+
+        return this.inputs.toArray()[inputIndex];
     }
-    private getRightSiblingOfInput(inputName: string): ElementRef | null {
-        switch (inputName) {
-            case "daysDecimal":
-                return this.daysUnit;
-            case "daysUnit":
-                return this.hoursDecimal;
-            case "hoursDecimal":
-                return this.hoursUnit;
-            case "hoursUnit":
-                return this.minutesDecimal;
-            case "minutesDecimal":
-                return this.minutesUnit;
-            case "minutesUnit":
-                return null;
+    private getRightSiblingOfInput(inputIndex: number): ElementRef | null {
+        inputIndex += 1;
+        if (inputIndex >= this.inputs.length) {
+            return null;
         }
+
+        return this.inputs.toArray()[inputIndex];
     }
 
     /**
      * Focuses the last input in the control.
      */
     focusLastInput(origin: FocusOrigin): void {
-        this.focusInput(this.minutesUnit.nativeElement, origin);
+        this.focusInput(
+            this.inputs.toArray()[this.inputs.length - 1].nativeElement,
+            origin
+        );
     }
 
     private focusInput(input: HTMLElement, origin: FocusOrigin): void {
@@ -692,10 +723,9 @@ export class NgMdTimeInputComponent
     set required(req) {
         this._required = coerceBooleanProperty(req);
         // Updating the required status of the inputs.
-        this.parts
-            .get("minutesUnit")
-            .setValidators(this.getMinutesUnitValidator());
-        this.parts.get("minutesUnit").updateValueAndValidity(); // To trigger the new validators.
+        const minutesUnit = this.getControlAt(-1);
+        minutesUnit.setValidators(this.getMinutesUnitValidator());
+        minutesUnit.updateValueAndValidity(); // To trigger the new validators.
 
         this.stateChanges.next();
     }
