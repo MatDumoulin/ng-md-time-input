@@ -6,7 +6,6 @@
         <mat-form-field>
             <ng-md-time-input name="durationInput" [(ngModel)]="testDuration" placeholder="Test" [showDays]="showDays" minutesSeparator=""
                 (change)="testChange($event)" (input)="testInput($event)">
-
             </ng-md-time-input>
         </mat-form-field>
         <div *ngIf="testDuration">
@@ -32,5 +31,5 @@
 
 
 <mat-form-field>
-    <input [(ngModel)]="testValue" placeholder="Test" (change)="testChange($event)" (input)="testInput($event)" matInput>
+    <input [(ngModel)]="testValue" placeholder="Test" (change)="testChange($event)" (input)="testInput($event)" disabled matInput>
 </mat-form-field>

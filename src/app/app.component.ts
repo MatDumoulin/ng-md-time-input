@@ -4,10 +4,13 @@ import { FormGroup } from '@angular/forms';
 import { utc, duration } from "moment";
 import { MomentTimeAdapter } from '../../projects/ng-md-time-input/src/public_api';
 
+/**
+ * This is a playground where you can manually test the ng-md-time-input.
+ */
 @Component({
-    selector: 'app-root',
-    templateUrl: './app.component.html',
-    styleUrls: ['./app.component.css']
+    selector: "app-root",
+    templateUrl: "./app.component.html",
+    styleUrls: ["./app.component.css"]
 })
 export class AppComponent {
     formGroup: FormGroup;
@@ -38,4 +41,11 @@ export class AppComponent {
         return "";
     }
 
+    toggleDisableState() {
+        if (this.formGroup.get("timeInput").enabled) {
+            this.formGroup.get("timeInput").disable();
+        } else {
+            this.formGroup.get("timeInput").enable();
+        }
+    }
 }

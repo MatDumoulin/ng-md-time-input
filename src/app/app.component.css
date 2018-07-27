@@ -1,0 +1,7 @@
+.time-input-container {
+    display: flex;
+}
+
+.toggle-disabled {
+    height: 2em;
+}

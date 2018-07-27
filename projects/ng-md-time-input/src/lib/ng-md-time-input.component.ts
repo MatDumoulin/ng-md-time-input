@@ -9,7 +9,8 @@ import {
     Optional,
     Renderer2,
     Self,
-    ViewChild
+    ViewChild,
+    DoCheck
 } from "@angular/core";
 import {
     ControlValueAccessor,
@@ -19,26 +20,43 @@ import {
     Validators,
     ValidatorFn
 } from "@angular/forms";
-import { MatFormFieldControl } from "@angular/material";
+import {
+    MatFormFieldControl,
+    ErrorStateMatcher,
+    CanUpdateErrorState
+} from "@angular/material";
 import { FocusMonitor, FocusOrigin } from "@angular/cdk/a11y";
 import { coerceBooleanProperty } from "@angular/cdk/coercion";
 import { Subject, Subscription } from "rxjs";
+// Control state management
+import { _TimeInputMixinBase } from "./control-state";
 // Moment
 import { Duration, Moment } from "moment";
 // Time Adapters
 import { TimeInputAdapter } from "./adapters";
 import { TimeFormatter } from "./formatters";
-// Time input model
 import { TimeInputModel, TemporalObjectDescriptor } from './model/time-input.model';
 
 @Component({
     selector: "ng-md-time-input",
     templateUrl: "./ng-md-time-input.component.html",
     styleUrls: ["./ng-md-time-input.component.css"],
+    changeDetection: ChangeDetectionStrategy.OnPush,
+    host: {
+        role: "textbox",
+        "[attr.id]": "id",
+        "[attr.aria-required]": "required.toString()",
+        "[attr.aria-disabled]": "disabled.toString()",
+        "[attr.aria-invalid]": "errorState",
+        "[attr.aria-describedby]": "describedBy || null",
+        "[class.ng-md-time-input-disabled]": "disabled",
+        "[class.ng-md-time-input-invalid]": "errorState",
+        "[class.ng-md-time-input-required]": "required",
+        class: "ng-md-time-input"
+    },
     providers: [
         { provide: MatFormFieldControl, useExisting: NgMdTimeInputComponent }
     ],
-    changeDetection: ChangeDetectionStrategy.OnPush,
     inputs: [
         "daysSeparator",
         "hoursSeparator",
@@ -80,16 +98,15 @@ export class NgMdTimeInputComponent
     //////////////////////////////////////////////////////////////////
     // For Mat Form Field
     // Used by Angular Material to map hints and errors to the control.
-    @HostBinding() id = `time-input-${NgMdTimeInputComponent.nextId++}`;
+    id = `time-input-${NgMdTimeInputComponent.nextId++}`;
     // Used by Angular Material to bind Aria ids to our control
-    @HostBinding("attr.aria-describedby") describedBy = "";
+    describedBy = "";
 
     parts: FormGroup;
     private _placeholder: string;
     focused = false;
     private _required = false;
     private _disabled = false;
-    errorState = false; // By default the input is valid.
     controlType = "time-input"; // Class identifier for this control will be mat-form-field-time-input.
 
     // NgModel
@@ -348,7 +365,6 @@ export class NgMdTimeInputComponent
             this.errorState = true;
         }
     }
-
     /**
      * Handles the keydown event on the time input.
      * @param event The keyboard event related to the key down.
@@ -508,6 +524,18 @@ export class NgMdTimeInputComponent
     }
 
     /**
+     * This function is to put the cursor at the end of input to prevent undesirable behaviour when the cursor is at the beginning
+     */
+    onClick(event: any) {
+        const val = event.target.value;
+
+        if (val) {
+            const len = event.target.value.length;
+            event.target.setSelectionRange(len, len);
+        }
+    }
+
+    /**
      * This function is to create an event with modern browser or old browser
      * @param type Type of event to create
      */
@@ -626,6 +654,12 @@ export class NgMdTimeInputComponent
         this.propagateTouched = fn;
     }
 
+    /**
+     * Disables the select. Part of the ControlValueAccessor interface required
+     * to integrate with Angular's core forms API.
+     *
+     * @param isDisabled Sets whether the component is disabled.
+     */
     setDisabledState(isDisabled: boolean): void {
         this._renderer.setProperty(
             this.elRef.nativeElement,
@@ -633,5 +667,6 @@ export class NgMdTimeInputComponent
             isDisabled
         );
         this.disabled = isDisabled;
+        this.stateChanges.next();
     }
 }

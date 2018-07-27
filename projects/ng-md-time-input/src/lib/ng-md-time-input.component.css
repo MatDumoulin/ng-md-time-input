@@ -9,7 +9,7 @@ input {
   outline: none;
   font: inherit;
   text-align: right;
-  width: 0.7em;
+  width: 0.75em;
 }
 
 input:not(:first-child) {
