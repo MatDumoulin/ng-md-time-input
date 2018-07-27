@@ -1,26 +1,33 @@
 <!-- this is a playground where you can test that the ng-md-time-input works properly.
      If there is code below, it is only for testing purpose. Feel free to change it as you want. -->
-
-<div class="time-input-container">
-    <form [formGroup]="formGroup">
-
+<form>
+    <div class="row">
+        <h4>Duration input</h4>
         <mat-form-field>
-            <ng-md-time-input formControlName="timeInput" [(ngModel)]="testTime" placeholder="Test" [showDays]="showDays" minutesSeparator=""
-                (change)="testChange($event)" (input)="testInput($event)" #timeInput></ng-md-time-input>
+            <ng-md-time-input name="durationInput" [(ngModel)]="testDuration" placeholder="Test" [showDays]="showDays" minutesSeparator=""
+                (change)="testChange($event)" (input)="testInput($event)">
+            </ng-md-time-input>
         </mat-form-field>
+        <div *ngIf="testDuration">
+            <pre>{{getDuration()}}</pre>
+        </div>
+    </div>
 
-        <pre>{{timeInput.errorState}} || {{formGroup.get('timeInput').invalid}}
-            {{formGroup.get('timeInput').errors | json }}
-        </pre>
+    <div class="row">
+        <h4>Moment Time input</h4>
+        <mat-form-field>
+            <ng-md-time-input name="timeInput" [(ngModel)]="testTime" placeholder="Test" [showDays]="showDays" minutesSeparator=""
+                 (change)="testChange($event)" (input)="testInput($event)">
 
-    </form>
+            </ng-md-time-input>
+        </mat-form-field>
+        <div *ngIf="testTime">
+            <pre>{{testTime.format("L HH:mm")}}</pre>
+        </div>
+    </div>
 
-    <button class="toggle-disabled" (click)="toggleDisableState()">{{formGroup.get('timeInput').disabled ? "Enable Input" : "Disable Input"}}</button>
-</div>
+</form>
 
-<div *ngIf="testTime">
-    <pre>{{getTime()}}</pre>
-</div>
 
 
 <mat-form-field>

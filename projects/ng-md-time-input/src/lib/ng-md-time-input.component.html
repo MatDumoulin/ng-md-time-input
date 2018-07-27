@@ -1,21 +1,21 @@
 <form [formGroup]="parts" (mousedown)="keepFocus()">
     <span *ngIf="showDays">
-        <input id="daysDecimal" formControlName="daysDecimal" placeholder="0" (input)="updateTime()" (click)="onClick($event)" (keydown)="handleKeydown($event, 'daysDecimal')"
-            #daysDecimal ng-md-only-number>
-        <input id="daysUnit" formControlName="daysUnit" placeholder="0" (input)="updateTime()" (click)="onClick($event)" (keydown)="handleKeydown($event, 'daysUnit')"
-            #daysUnit ng-md-only-number>
+        <input id="daysDecimal" formControlName="daysDecimal" placeholder="0" (input)="updateTime()" (keydown)="handleKeydown($event, 'daysDecimal')"
+            autocomplete="off" #daysDecimal ng-md-only-number>
+        <input id="daysUnit" formControlName="daysUnit" placeholder="0" (input)="updateTime()" (keydown)="handleKeydown($event, 'daysUnit')"
+            autocomplete="off" #daysUnit ng-md-only-number>
         <span class="separator" [ngClass]="{dimmed:displayedDays==='' || disabled}" (mousedown)="keepFocus()">{{daysSeparator}}</span>
     </span>
 
-    <input id="hoursDecimal" formControlName="hoursDecimal" placeholder="0" (click)="onClick($event)" (input)="updateTime()" (keydown)="handleKeydown($event, 'hoursDecimal')"
-        #hoursDecimal ng-md-only-number>
-    <input id="hoursUnit" formControlName="hoursUnit" placeholder="0" (click)="onClick($event)" (input)="updateTime()" (keydown)="handleKeydown($event, 'hoursUnit')"
-        #hoursUnit ng-md-only-number>
-    <span class="separator" [ngClass]="{dimmed:displayedHours==='' || disabled}" (click)="onClick($event)" (mousedown)="keepFocus()">{{hoursSeparator}}</span>
+    <input id="hoursDecimal" formControlName="hoursDecimal" placeholder="0" (input)="updateTime()" (keydown)="handleKeydown($event, 'hoursDecimal')"
+        autocomplete="off" #hoursDecimal ng-md-only-number>
+    <input id="hoursUnit" formControlName="hoursUnit" placeholder="0" (input)="updateTime()" (keydown)="handleKeydown($event, 'hoursUnit')"
+        autocomplete="off" #hoursUnit ng-md-only-number>
+    <span class="separator" [ngClass]="{dimmed:displayedHours==='' || disabled}" (mousedown)="keepFocus()">{{hoursSeparator}}</span>
 
-    <input id="minutesDecimal" formControlName="minutesDecimal" placeholder="0" (click)="onClick($event)" (input)="updateTime()" (keydown)="handleKeydown($event, 'minutesDecimal')"
-        #minutesDecimal ng-md-only-number>
-    <input id="minutesUnit" formControlName="minutesUnit" placeholder="0" (click)="onClick($event)" (input)="updateTime()" (keydown)="handleKeydown($event, 'minutesUnit')"
-        #minutesUnit ng-md-only-number>
+    <input id="minutesDecimal" formControlName="minutesDecimal" placeholder="0" (input)="updateTime()" (keydown)="handleKeydown($event, 'minutesDecimal')"
+        autocomplete="off" #minutesDecimal ng-md-only-number>
+    <input id="minutesUnit" formControlName="minutesUnit" placeholder="0" (input)="updateTime()" (keydown)="handleKeydown($event, 'minutesUnit')"
+        autocomplete="off" #minutesUnit ng-md-only-number>
     <span class="separator" [ngClass]="{dimmed:displayedMinutes==='' || disabled}" (mousedown)="keepFocus()">{{minutesSeparator}}</span>
 </form>

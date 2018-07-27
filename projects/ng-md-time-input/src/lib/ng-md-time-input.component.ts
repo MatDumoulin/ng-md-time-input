@@ -1,9 +1,7 @@
 import {
     Component,
     ChangeDetectionStrategy,
-    ChangeDetectorRef,
     ElementRef,
-    forwardRef,
     HostBinding,
     Input,
     OnDestroy,
@@ -18,14 +16,9 @@ import {
     ControlValueAccessor,
     FormBuilder,
     FormGroup,
-    NG_VALUE_ACCESSOR,
     NgControl,
     Validators,
-    AbstractControl,
-    Validator,
-    ValidatorFn,
-    NgForm,
-    FormGroupDirective
+    ValidatorFn
 } from "@angular/forms";
 import {
     MatFormFieldControl,
@@ -38,9 +31,11 @@ import { Subject, Subscription } from "rxjs";
 // Control state management
 import { _TimeInputMixinBase } from "./control-state";
 // Moment
-import { Duration, duration, isDuration } from "moment";
-// Others
-import { TimeFactoryService } from "./time-factory.service";
+import { Duration, Moment } from "moment";
+// Time Adapters
+import { TimeInputAdapter } from "./adapters";
+import { TimeFormatter } from "./formatters";
+import { TimeInputModel, TemporalObjectDescriptor } from './model/time-input.model';
 
 @Component({
     selector: "ng-md-time-input",
@@ -61,31 +56,32 @@ import { TimeFactoryService } from "./time-factory.service";
     },
     providers: [
         { provide: MatFormFieldControl, useExisting: NgMdTimeInputComponent }
+    ],
+    inputs: [
+        "daysSeparator",
+        "hoursSeparator",
+        "minutesSeparator",
+        "showDays",
+        "timeAdapter",
+        "value",
+        "placeholder",
+        "disabled",
+        "required"
     ]
 })
-export class NgMdTimeInputComponent extends _TimeInputMixinBase
+export class NgMdTimeInputComponent
     implements
         OnInit,
-        DoCheck,
         OnDestroy,
-        MatFormFieldControl<Duration>,
-        ControlValueAccessor,
-        CanUpdateErrorState {
+        MatFormFieldControl<Duration | Moment | Date>,
+        ControlValueAccessor {
     static nextId = 0;
-    // Inputs and Outputs
-    @Input() daysSeparator = "d";
-    @Input() hoursSeparator = ":";
-    @Input() minutesSeparator = "";
-    @Input() showDays = true;
+    // UI
+    daysSeparator = "d";
+    hoursSeparator = ":";
+    minutesSeparator = "";
     // Time management
-    time: Duration;
-    private readonly MINUTES_UNIT_INCREMENT_STEP = 1;
-    private readonly NUMBER_OF_MINUTES_IN_TEN_MINUTES = 10;
-    private readonly NUMBER_OF_MINUTES_IN_HOUR = 60;
-    private readonly NUMBER_OF_MINUTES_IN_TEN_HOURS = 600;
-    private readonly NUMBER_OF_MINUTES_IN_DAY = 1440;
-    private readonly NUMBER_OF_MINUTES_IN_TEN_DAYS = 14400;
-    private readonly MAX_TIME_IN_MINUTES = 143999; // 99d 23:59
+    model = new TimeInputModel();
     // Form element management
     private _preventFocusLoss = false;
     private subscriptions: Subscription[] = [];
@@ -97,9 +93,7 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
     @ViewChild("daysUnit") daysUnit: ElementRef;
     @ViewChild("daysDecimal") daysDecimal: ElementRef;
     // For the change event
-    // By default, the change event is only triggered when the user types in a new value.
-    // In our case, we want to trigger it when the user increments/decrements the value too.
-    private previousDuration: Duration = null;
+    private previousTime: Duration | Moment | Date = null;
     private shouldManuallyTriggerChangeEvent: boolean;
     //////////////////////////////////////////////////////////////////
     // For Mat Form Field
@@ -120,25 +114,15 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
     propagateTouched = () => {};
 
     constructor(
-        private changeDetectorRef: ChangeDetectorRef,
         private elRef: ElementRef,
         fb: FormBuilder,
         private fm: FocusMonitor,
-        _defaultErrorStateMatcher: ErrorStateMatcher,
-        @Optional() @Self() ngControl: NgControl,
-        @Optional() _parentForm: NgForm,
-        @Optional() _parentFormGroup: FormGroupDirective,
+        private formatter: TimeFormatter,
+        @Optional()
+        @Self()
+        public ngControl: NgControl,
         private _renderer: Renderer2,
-        private timeFactoryService: TimeFactoryService
     ) {
-        // Passing the context of the component to the state manager
-        super(
-            _defaultErrorStateMatcher,
-            _parentForm,
-            _parentFormGroup,
-            ngControl
-        );
-
         // Form initialization. On top of a directive that prevents the input of non
         // numerical char, we add a pattern to assure that only numbers are allowed.
         this.parts = fb.group({
@@ -150,10 +134,18 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
             minutesUnit: ["", this.getMinutesUnitValidator()]
         });
 
+        // Subscribing to the form's status change in order to sync up the state of the NgControl with
+        // the one of the form.
+        this.subscriptions.push(
+            this.parts.statusChanges.subscribe(() =>
+                this.handleFormStatusChange()
+            )
+        );
+
         // Monitoring the focus in the time input.
-        fm
-            .monitor(elRef.nativeElement, true)
-            .subscribe(origin => this.handleFocusChange(origin));
+        fm.monitor(elRef.nativeElement, true).subscribe(origin =>
+            this.handleFocusChange(origin)
+        );
 
         if (this.ngControl != null) {
             this.ngControl.valueAccessor = this;
@@ -175,23 +167,18 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
         }
     }
 
-    ngDoCheck() {
-        // Refreshes the error state of the component when its state changes.
-        if (this.ngControl) {
-            this.updateErrorState();
-        }
-    }
+    /////////////////////////////////////////////////////////////////////
+    // Getters and setters
 
     // This is where the NgModel with update our time.
-    @Input()
-    get value(): Duration | null {
-        return this.time;
+    get value(): Duration | Moment | Date | null {
+        return this.model.getTemporalObject();
     }
-    set value(time: Duration | null) {
-        if (time && isDuration(time)) {
-            this.time = time.clone();
+    set value(time: Duration | Moment | Date | null) {
+        if (time) {
+            this.model.setTemporalObject(time);
         } else {
-            this.time = null;
+            this.model.setTemporalObject(null);
         }
         // Sets the time to display in the proper format.
         this.formatDislayedTime();
@@ -199,6 +186,36 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
         this.emitChanges();
         this.shouldManuallyTriggerChangeEvent = false;
     }
+
+    set showDays(showDays: boolean) {
+        this.model.handleDays = showDays;
+        this.formatDislayedTime();
+    }
+    get showDays(): boolean {
+        return this.model.handleDays;
+    }
+
+    set timeAdapter(adapter: TimeInputAdapter<Duration | Moment | Date>) {
+        const currentTime = this.model.getTemporalObject();
+        // Check if the current time object matches the new adapter.
+        if (currentTime && !adapter.isValid(currentTime)) {
+            // If it is not the case, log an error
+            throw new Error(
+                "The given TimeInputAdapter does not match the current NgModel value type."
+            );
+        }
+        else if(!currentTime) {
+            this.model.setTemporalObject(null, adapter);
+            // Sets the time to display in the proper format.
+            this.formatDislayedTime();
+        }
+        // Otherwise, the adapter hasn't change so ignore the action.
+    }
+
+    get timeAdapter(): TimeInputAdapter<Duration | Moment | Date> {
+        return this.model.temporalObjectAdapter;
+    }
+    ////////////////////////////////////////////////////////////////////
 
     /**
      * Gets the string representation of the displayed time.
@@ -211,9 +228,16 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
      * Sets the displayed days to the given value.
      * Note: This affectation will not change the ngModel value.
      */
-    set displayedDays(days: string) {
-        this.parts.get("daysDecimal").setValue(days.charAt(days.length - 2));
-        this.parts.get("daysUnit").setValue(days.charAt(days.length - 1));
+    set displayedDays(days: string | null) {
+        if (days) {
+            this.parts
+                .get("daysDecimal")
+                .setValue(days.charAt(days.length - 2));
+            this.parts.get("daysUnit").setValue(days.charAt(days.length - 1));
+        } else {
+            this.parts.get("daysDecimal").setValue("");
+            this.parts.get("daysUnit").setValue("");
+        }
     }
     get displayedDays(): string {
         return (
@@ -264,11 +288,12 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
      */
     updateTime(): void {
         this.updateDisplayedTime();
-        this.setTimeFromString(
+        this.model.updateTime(
             this.displayedDays,
             this.displayedHours,
             this.displayedMinutes
         );
+        this.emitChanges();
     }
 
     /**
@@ -280,58 +305,8 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
 
         this.displayedMinutes = displayedTime.slice(-2); // Take only the last two characters.
         this.displayedHours = displayedTime.slice(-4, -2); // Takes from the fourth character starting from the end to the second.
-        this.displayedDays = displayedTime.slice(0, -4); // Take all characters but the last four.
-    }
-
-    /**
-     * Converts a time string into a proper time format. It also set the ngModel time to the converted value.
-     * @param daysString The days to set. The maximum day allowed is 99.
-     * @param hoursString The hours to set. The hours will be converted to a 24 hours format. This means that
-     *                    if the given hour is 25, the displayed hours will be 1.
-     * @param minutesString The minutes to set. The minutes will be onverted to a 60 minutes format. This means
-     *                      if the given minute 61, it will add an hour and set the minutes to 01.
-     */
-    setTimeFromString(
-        daysString: string,
-        hoursString: string,
-        minutesString: string
-    ): void {
-        // First of, we parse the strings to number in order to validate if they are numbers.
-        let days = parseInt(daysString, 10);
-        let hours = parseInt(hoursString, 10);
-        let minutes = parseInt(minutesString, 10);
-
-        // The strings can be NaN if they are empty, null, undefined or contain a letter.
-        if (
-            Number.isNaN(days) &&
-            Number.isNaN(hours) &&
-            Number.isNaN(minutes)
-        ) {
-            this.time = null;
-        } else {
-            days = Number.isNaN(days) ? 0 : days;
-            hours = Number.isNaN(hours) ? 0 : hours;
-            minutes = Number.isNaN(minutes) ? 0 : minutes;
-            this.setTimeFromMinutes(
-                days * this.NUMBER_OF_MINUTES_IN_DAY +
-                    hours * this.NUMBER_OF_MINUTES_IN_HOUR +
-                    minutes
-            );
-        }
-
-        this.emitChanges();
-    }
-
-    private setTimeFromMinutes(minutes: number) {
-        // If the time is greater than the max time, set it to the max time.
-        if (minutes > this.MAX_TIME_IN_MINUTES) {
-            this.time = duration(this.MAX_TIME_IN_MINUTES, "minutes");
-        }
-        // Else, if the time is negative, set it to 0.
-        else if (minutes < 0) {
-            this.time = duration();
-        } else {
-            this.time = duration(minutes, "minutes");
+        if (this.showDays) {
+            this.displayedDays = displayedTime.slice(0, -4); // Take all characters but the last four.
         }
     }
 
@@ -340,51 +315,15 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
      * If the time is not a duration, it will set it to an empty string.
      */
     private formatDislayedTime() {
-        if (!this.time || !isDuration(this.time)) {
-            this.displayedDays = "";
-            this.displayedHours = "";
-            this.displayedMinutes = "";
-        }
-        // Else, update the model with the written time.
-        else {
-            this.displayedDays = this.padWithChar(
-                "0",
-                Math.floor(this.time.asDays()).toString(),
-                2
-            );
-            this.displayedHours = this.padWithChar(
-                "0",
-                this.time.hours().toString(),
-                2
-            );
-            this.displayedMinutes = this.padWithChar(
-                "0",
-                this.time.minutes().toString(),
-                2
-            );
-        }
-    }
+        const { days, hours, minutes} = this.formatter.formatDislayedTime(
+            this.model.getTemporalObject(),
+            this.model.temporalObjectAdapter,
+            this.showDays
+        );
 
-    /**
-     * Pads the given value with the given char. The padding is added at the beginning of the value.
-     * @param char The char to use as padding. Its length must be of 1.
-     * @param valueToPad The string value you want to pad.
-     * @param desiredFinalLength The final desired length of the string.
-     * @returns The padded representation of the given value.
-     */
-    private padWithChar(
-        char: string,
-        valueToPad: string,
-        desiredFinalLength: number
-    ): string {
-        if (!char || char.length !== 1) {
-            throw new Error(
-                "[padWithChar] Cannot have multiple characters as padding. Only one is allowed."
-            );
-        }
-
-        const paddedString = char.repeat(desiredFinalLength) + valueToPad;
-        return paddedString.slice(desiredFinalLength * -1);
+        this.displayedDays = days;
+        this.displayedHours = hours;
+        this.displayedMinutes = minutes;
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -419,6 +358,13 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
         this.stateChanges.next();
     }
 
+    private handleFormStatusChange() {
+        if (!this.parts.invalid && this.errorState) {
+            this.errorState = false;
+        } else if (this.parts.invalid && !this.errorState) {
+            this.errorState = true;
+        }
+    }
     /**
      * Handles the keydown event on the time input.
      * @param event The keyboard event related to the key down.
@@ -427,16 +373,14 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
     handleKeydown(event: KeyboardEvent, targettedInputName: string): void {
         // On up arrow, we want to increment the targetted input
         if (event.key === "ArrowUp" || event.key === "Up") {
-            const incrementStep = this.getIncrementStep(targettedInputName);
-            this.incrementTime(incrementStep);
+            this.incrementTime(targettedInputName, false);
             event.preventDefault(); // Prevents the carret from moving to the lefthand of the input
             // event.stopPropagation(); // prevents the carret from moving
             return;
         }
         // On down arrow, we want to decrement the targetted input
         else if (event.key === "ArrowDown" || event.key === "Down") {
-            const decrementStep = this.getDecrementStep(targettedInputName);
-            this.incrementTime(decrementStep);
+            this.incrementTime(targettedInputName, true);
             event.preventDefault(); // Prevents the carret from moving to the righthand of the input
             // event.stopPropagation(); // prevents the carret from moving
             return;
@@ -474,15 +418,17 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
     }
 
     /**
-     * Increments the current time by the given amount of minutes.
-     * @param incrementStep The increment step, in minutes.
+     * Increments or decrements the given input.
      */
-    incrementTime(incrementStep: number) {
-        if (!this.time) {
-            this.time = duration();
-        }
+    incrementTime(inputName: string, isDecrement: boolean) {
+        const fieldDescriptor = this.getDescriptor(inputName);
 
-        this.setTimeFromMinutes(this.time.asMinutes() + incrementStep);
+        if(!isDecrement) {
+            this.model.incrementTime(fieldDescriptor);
+        }
+        else {
+            this.model.decrementTime(fieldDescriptor);
+        }
 
         // Once the ngModel is updated, update the displayed time.
         this.formatDislayedTime();
@@ -493,83 +439,35 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
     }
 
     /**
-     * @returns The proper increment step, based on the given input name.
+     * @returns An object that flags what is the input matching the inputName.
      */
-    private getIncrementStep(inputName: string): number {
+    private getDescriptor(inputName: string): Partial<TemporalObjectDescriptor> {
+        const descriptor: Partial<TemporalObjectDescriptor> = {};
+
         switch (inputName) {
             case "daysDecimal":
-                return this.NUMBER_OF_MINUTES_IN_TEN_DAYS;
+                descriptor.daysDecimal = true;
+                break;
             case "daysUnit":
-                return this.NUMBER_OF_MINUTES_IN_DAY;
+                descriptor.days = true;
+                break;
             case "hoursDecimal":
-                return this.getHoursDecimalIncrementStep();
+                descriptor.hoursDecimal = true;
+                break;
             case "hoursUnit":
-                return this.NUMBER_OF_MINUTES_IN_HOUR;
+                descriptor.hours = true;
+                break;
             case "minutesDecimal":
-                return this.NUMBER_OF_MINUTES_IN_TEN_MINUTES;
+                descriptor.minutesDecimal = true;
+                break;
             case "minutesUnit":
-                return this.MINUTES_UNIT_INCREMENT_STEP;
-        }
-    }
-    /**
-     * @returns The proper decrement step, based on the given input name.
-     */
-    private getDecrementStep(inputName: string): number {
-        switch (inputName) {
-            case "daysDecimal":
-                return -1 * this.NUMBER_OF_MINUTES_IN_TEN_DAYS;
-            case "daysUnit":
-                return -1 * this.NUMBER_OF_MINUTES_IN_DAY;
-            case "hoursDecimal":
-                return this.getHoursDecimalDecrementStep();
-            case "hoursUnit":
-                return -1 * this.NUMBER_OF_MINUTES_IN_HOUR;
-            case "minutesDecimal":
-                return -1 * this.NUMBER_OF_MINUTES_IN_TEN_MINUTES;
-            case "minutesUnit":
-                return -1 * this.MINUTES_UNIT_INCREMENT_STEP;
-        }
-    }
-
-    private getHoursDecimalIncrementStep(): number {
-        const currentNumberOfMinutesInTime =
-            this.time.hours() * 60 + this.time.minutes();
-        let incrementStep = this.NUMBER_OF_MINUTES_IN_TEN_HOURS;
-
-        // The hours are on a base 24, which means that we have to adjust the increment step
-        // so that the increment does not change the hours unit. (Ex: We increment the hours decimal of 0d 15:00,
-        // we don't want it to display as 1d 01:00, but we want it as 1d 05:00).
-        if (
-            currentNumberOfMinutesInTime + this.NUMBER_OF_MINUTES_IN_TEN_HOURS >
-            this.NUMBER_OF_MINUTES_IN_DAY
-        ) {
-            incrementStep =
-                (24 - this.time.hours() + this.time.hours() % 10) *
-                this.NUMBER_OF_MINUTES_IN_HOUR;
+                descriptor.minutes = true;
+                break;
+            default:
+                throw new Error("Invalid input name.");
         }
 
-        return incrementStep;
-    }
-
-    private getHoursDecimalDecrementStep(): number {
-        const currentNumberOfMinutesInTime =
-            this.time.hours() * 60 + this.time.minutes();
-        let decrementStep = this.NUMBER_OF_MINUTES_IN_TEN_HOURS * -1;
-
-        // The hours are on a base 24, which means that we have to adjust the decrement step
-        // so that the decrement does not change the hours unit. (Ex: We decrement the hours decimal of 1d 09:00,
-        // we don't want it to display as 0d 23:00, but we want it as 0d 19:00).
-        if (
-            currentNumberOfMinutesInTime - this.NUMBER_OF_MINUTES_IN_TEN_HOURS <
-            0
-        ) {
-            decrementStep =
-                (this.time.hours() + (14 - this.time.hours()) % 10) *
-                this.NUMBER_OF_MINUTES_IN_HOUR *
-                -1;
-        }
-
-        return decrementStep;
+        return descriptor;
     }
 
     private getLeftSiblingOfInput(inputName: string): ElementRef | null {
@@ -679,7 +577,7 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
 
     // This functions tells the mat-form-field wheter it is empty or not.
     get empty() {
-        return !this.time || !isDuration(this.time);
+        return !this.model.getTemporalObject() || !this.model.isModelValid();
     }
 
     // Used by Angular Material to display the label properly
@@ -734,15 +632,16 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
     }
 
     emitChanges() {
-        if (this.previousDuration !== this.value) {
+        if (this.previousTime !== this.value) {
             this.shouldManuallyTriggerChangeEvent = true;
         }
         this.stateChanges.next();
         this.propagateChange(this.value);
-        this.previousDuration = this.value;
+        this.previousTime = this.value;
     }
 
-    // ----------For the ngModel two way binding -------------------------------//
+    ////////////////////////////////////////////////////////////////////////////
+    // For the ngModel two way binding
     writeValue(value: Duration | null) {
         this.value = value;
     }
@@ -762,6 +661,11 @@ export class NgMdTimeInputComponent extends _TimeInputMixinBase
      * @param isDisabled Sets whether the component is disabled.
      */
     setDisabledState(isDisabled: boolean): void {
+        this._renderer.setProperty(
+            this.elRef.nativeElement,
+            "disabled",
+            isDisabled
+        );
         this.disabled = isDisabled;
         this.stateChanges.next();
     }

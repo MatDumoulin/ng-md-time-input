@@ -4,7 +4,8 @@ import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { MatInputModule } from '@angular/material';
 import { NgMdTimeInputComponent } from './ng-md-time-input.component';
 import { OnlyNumberDirective } from './only-number.directive';
-import { TimeFactoryService } from './time-factory.service';
+import { TimeFormatter } from './formatters';
+// import { TimeFactoryService } from './time-factory.service';
 
 
 @NgModule({
@@ -22,7 +23,7 @@ import { TimeFactoryService } from './time-factory.service';
     NgMdTimeInputComponent
   ],
   providers: [
-    TimeFactoryService
+    TimeFormatter
   ]
 })
 export class NgMdTimeInputModule { }
